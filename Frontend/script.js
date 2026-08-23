@@ -111,7 +111,7 @@ summarizeButton.addEventListener("click", async function () {
     try {
 
         const response = await fetch(
-            "https://document-summary-assistant-tgl0.onrender.com/" + length,
+            "https://document-summary-assistant-tgl0.onrender.com/process?length=" + length,
             {
                 method: "POST",
                 body: formData
