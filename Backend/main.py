@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pypdf import PdfReader
 from PIL import Image
-from google import genai
+from groq import Groq, GroqError, RateLimitError, AuthenticationError
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import pytesseract
@@ -11,16 +11,17 @@ import os
 
 load_dotenv()
 
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
+# Optional for Windows; on hosted Linux, use Tesseract from PATH.
+tesseract_path = os.getenv("TESSERACT_CMD")
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-api_key = os.getenv("GEMINI_API_KEY")
+api_key = os.getenv("GROQ_API_KEY")
 
 if not api_key:
-    raise RuntimeError("GEMINI_API_KEY is missing from .env")
+    raise RuntimeError("GROQ_API_KEY is missing from environment variables or .env")
 
-client = genai.Client(api_key=api_key)
+client = Groq(api_key=api_key)
 
 app = FastAPI(
     title="Document Summary Assistant",
@@ -30,7 +31,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"]
 )
@@ -221,46 +222,26 @@ DOCUMENT TEXT:
 """
 
     try:
-
-        models = [
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash"
-        ]
-
-        last_error = None
-
-        for model_name in models:
-
-            try:
-                print(f"Trying model: {model_name}")
-
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
-
-                print(f"Success with: {model_name}")
-
-                return response.text
-
-            except Exception as e:
-                print(f"{model_name} failed: {e}")
-                last_error = e
-
-        raise last_error
-
-    except Exception as e:
-
-        print("========== GEMINI ERROR ==========")
-        print(type(e).__name__)
-        print(str(e))
-        print("===================================")
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Summary generation failed: {str(e)}"
+        response = client.chat.completions.create(
+            model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
+            messages=[
+                {"role": "system", "content": "You are an accurate, grounded document summarization assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_completion_tokens=1800,
         )
+        summary = response.choices[0].message.content
+        if not summary:
+            raise HTTPException(status_code=502, detail="AI provider returned an empty summary.")
+        return summary
+    except RateLimitError:
+        raise HTTPException(status_code=429, detail="AI rate limit reached. Try again later or use a shorter document.")
+    except AuthenticationError:
+        raise HTTPException(status_code=502, detail="AI provider authentication failed. Check GROQ_API_KEY on the server.")
+    except GroqError as exc:
+        print(f"Groq request failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=502, detail="AI provider request failed. Check server logs.")
 
 @app.post("/summarize")
 async def summarize_document(
