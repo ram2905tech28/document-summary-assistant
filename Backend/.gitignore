@@ -1,17 +1,7 @@
-
 .env
 .env.*
 !.env.example
-**/.env
-**/.env.*
-
-
 .venv/
 venv/
-env/
-
 __pycache__/
 *.pyc
-
-# Local files
-*.log
